@@ -36,4 +36,21 @@ async def failing_task():
     await asyncio.sleep(1)
     raise ValueError("intentional test failure")
 
+
+from flask_async_celery import AsyncCelery, update_progress
+
+@celery.task
+async def progress_task(total=10):
+    for current in range(1, total + 1):
+        await asyncio.sleep(1)
+
+        await update_progress(
+            current=current,
+            total=total,
+            message=f"Processed {current} of {total}",
+        )
+
+    return {"status": "completed", "total": total}
+
+
 celery_app = celery.celery

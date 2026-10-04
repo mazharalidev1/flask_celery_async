@@ -346,3 +346,231 @@ def test_task_cancellation():
 
     finally:
         executor.shutdown()
+
+
+
+
+def test_monitor_tracks_successful_task():
+    executor = AsyncExecutor(max_tasks=1)
+
+    executor.start()
+
+    async def work():
+        await asyncio.sleep(0.01)
+        return "done"
+
+    future = executor.submit(
+        work(),
+        task_id="monitor-success",
+        task_name="work",
+    )
+
+    assert future.result(timeout=2) == "done"
+
+    history = executor.monitor.history()
+
+    assert len(history) == 1
+    assert history[0]["task_id"] == "monitor-success"
+    assert history[0]["task_name"] == "work"
+    assert history[0]["state"] == "SUCCESS"
+    assert history[0]["runtime"] is not None
+
+    executor.shutdown()
+
+
+def test_monitor_tracks_failed_task():
+    executor = AsyncExecutor(max_tasks=1)
+    executor.start()
+
+    async def failing_work():
+        await asyncio.sleep(0.01)
+        raise ValueError("boom")
+
+    future = executor.submit(
+        failing_work(),
+        task_id="monitor-failure",
+        task_name="failing_work",
+    )
+
+    with pytest.raises(ValueError, match="boom"):
+        future.result(timeout=2)
+
+    history = executor.monitor.history()
+
+    assert len(history) == 1
+    assert history[0]["task_id"] == "monitor-failure"
+    assert history[0]["state"] == "FAILURE"
+    assert history[0]["exception"] == "boom"
+
+    executor.shutdown()
+
+
+def test_monitor_tracks_running_cancellation():
+    executor = AsyncExecutor(max_tasks=1)
+    executor.start()
+
+    async def slow_work():
+        await asyncio.sleep(10)
+
+    future = executor.submit(
+        slow_work(),
+        task_id="monitor-cancel",
+        task_name="slow_work",
+    )
+
+    time.sleep(0.05)
+
+    assert executor.cancel_task(
+        "monitor-cancel",
+        reason="test cancellation",
+    )
+
+    with pytest.raises(CancelledError):
+        future.result(timeout=2)
+
+    history = executor.monitor.history()
+
+    assert len(history) == 1
+    assert history[0]["task_id"] == "monitor-cancel"
+    assert history[0]["state"] == "CANCELLED"
+    assert history[0]["exception"] == "test cancellation"
+
+    executor.shutdown()
+
+def test_monitor_tracks_queued_cancellation():
+    executor = AsyncExecutor(max_tasks=1)
+    executor.start()
+
+    async def slow_work():
+        await asyncio.sleep(1)
+
+    first = executor.submit(
+        slow_work(),
+        task_id="monitor-first",
+        task_name="first",
+    )
+
+    time.sleep(0.05)
+
+    second = executor.submit(
+        slow_work(),
+        task_id="monitor-second",
+        task_name="second",
+    )
+
+    time.sleep(0.05)
+
+    assert executor.cancel_task(
+        "monitor-second",
+        reason="queued cancellation",
+    )
+
+    with pytest.raises(CancelledError):
+        second.result(timeout=2)
+
+    history = executor.monitor.history()
+
+    cancelled = next(
+        task for task in history
+        if task["task_id"] == "monitor-second"
+    )
+
+    assert cancelled["state"] == "CANCELLED"
+    assert cancelled["exception"] == "queued cancellation"
+
+    first.result(timeout=2)
+
+    executor.shutdown()
+
+
+def test_monitor_tracks_task_progress():
+    executor = AsyncExecutor(max_tasks=1)
+    executor.start()
+
+    async def work():
+        executor.monitor.record_progress(
+            "progress-task",
+            current=25,
+            total=100,
+            message="Quarter complete",
+        )
+
+        await asyncio.sleep(0.01)
+
+        executor.monitor.record_progress(
+            "progress-task",
+            current=100,
+            total=100,
+            message="Complete",
+        )
+
+        return "done"
+
+    future = executor.submit(
+        work(),
+        task_id="progress-task",
+        task_name="progress_work",
+    )
+
+    assert future.result(timeout=2) == "done"
+
+    history = executor.monitor.history()
+
+    assert len(history) == 1
+
+    task = history[0]
+
+    assert task["task_id"] == "progress-task"
+    assert task["state"] == "SUCCESS"
+    assert task["progress"]["current"] == 100
+    assert task["progress"]["total"] == 100
+    assert task["progress"]["percentage"] == 100
+    assert task["progress"]["message"] == "Complete"
+
+    executor.shutdown()
+
+
+def test_running_tasks_includes_progress():
+    executor = AsyncExecutor(max_tasks=1)
+    executor.start()
+
+    async def work():
+        executor.monitor.record_progress(
+            "running-progress",
+            current=50,
+            total=100,
+            message="Halfway",
+        )
+
+        await asyncio.sleep(0.2)
+
+    future = executor.submit(
+        work(),
+        task_id="running-progress",
+        task_name="progress_work",
+    )
+
+    try:
+        for _ in range(100):
+            tasks = executor.running_tasks()
+
+            if tasks:
+                break
+
+            time.sleep(0.01)
+
+        assert len(tasks) == 1
+
+        task = tasks[0]
+
+        assert task["task_id"] == "running-progress"
+        assert task["state"] == "RUNNING"
+        assert task["progress"]["current"] == 50
+        assert task["progress"]["total"] == 100
+        assert task["progress"]["percentage"] == 50
+        assert task["progress"]["message"] == "Halfway"
+
+        future.result(timeout=2)
+
+    finally:
+        executor.shutdown()

@@ -9,6 +9,8 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any
 
+from .monitoring import TaskMonitor
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +27,7 @@ class TaskInfo:
     def duration(self) -> float:
         end = self.finished_at or time.monotonic()
         return end - self.started_at
+
 
 
 class AsyncExecutor:
@@ -78,6 +81,8 @@ class AsyncExecutor:
 
         self.slow_task_threshold = float(slow_task_threshold)
 
+        self.monitor = TaskMonitor()
+
     # ------------------------------------------------------------------
     # State
     # ------------------------------------------------------------------
@@ -119,6 +124,20 @@ class AsyncExecutor:
         """
         return self._stopping.is_set()
 
+    @property
+    def current_task_id(self) -> str | None:
+        """Return the task ID for the currently executing asyncio task."""
+        current = asyncio.current_task()
+
+        if current is None:
+            return None
+
+        with self._tasks_lock:
+            for task_id, async_task in self._asyncio_tasks.items():
+                if async_task is current:
+                    return task_id
+
+        return None
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -222,11 +241,12 @@ class AsyncExecutor:
 
     def submit(
             self,
-            coroutine: Coroutine[Any, Any, Any],
+            coroutine,
             *,
             task_id: str | None = None,
             task_name: str | None = None,
-    ) -> Future:
+            worker: str | None = None,
+    )-> Future:
         """
         Submit a coroutine to the persistent asyncio event loop.
 
@@ -251,12 +271,19 @@ class AsyncExecutor:
         if task_id is None:
             task_id = f"async-{id(coroutine)}"
 
+        self.monitor.record_received(
+            task_id,
+            task_name=task_name,
+            worker=worker,
+        )
+
         try:
             return asyncio.run_coroutine_threadsafe(
                 self._execute(
                     coroutine,
                     task_id=task_id,
                     task_name=task_name,
+
                 ),
                 loop,
             )
@@ -300,22 +327,58 @@ class AsyncExecutor:
             acquired = True
             info.started_at = time.monotonic()
 
+            self.monitor.record_started(
+                task_id,
+                task_name=task_name,
+
+            )
+
             self._increment_running()
 
             try:
                 result = await coroutine
 
+
             except asyncio.CancelledError:
+
                 info.state = "CANCELLED"
+
+                reason = self.get_cancel_reason(task_id)
+
+                self.monitor.record_cancelled(
+
+                    task_id,
+
+                    reason=str(reason) if reason is not None else None,
+
+                )
+
                 raise
+
 
             except BaseException as exc:
+
                 info.state = "FAILURE"
+
                 info.exception = f"{type(exc).__name__}: {exc}"
+
+                self.monitor.record_failure(
+
+                    task_id,
+
+                    exc,
+
+                )
+
                 raise
 
+
             else:
+
                 info.state = "SUCCESS"
+
+                self.monitor.record_success(task_id)
+
                 return result
 
             finally:
@@ -333,11 +396,22 @@ class AsyncExecutor:
 
                 self._decrement_running()
 
+
         except asyncio.CancelledError:
-            # Cancellation can happen while waiting for the semaphore,
-            # before the coroutine itself has started.
+
             if not acquired:
                 info.state = "CANCELLED"
+
+                reason = self.get_cancel_reason(task_id)
+
+                self.monitor.record_cancelled(
+
+                    task_id,
+
+                    reason=str(reason) if reason is not None else None,
+
+                )
+
                 with self._tasks_lock:
                     self._cancelled += 1
 
@@ -448,7 +522,7 @@ class AsyncExecutor:
 
     def running_tasks(self) -> list[dict[str, Any]]:
         with self._tasks_lock:
-            return [
+            tasks = [
                 {
                     "task_id": info.task_id,
                     "task_name": info.task_name,
@@ -459,6 +533,15 @@ class AsyncExecutor:
                 }
                 for info in self._tasks.values()
             ]
+
+        for task in tasks:
+            monitored = self.monitor.get_task(task["task_id"])
+
+            if monitored is not None:
+                task["worker"] = monitored["worker"]
+                task["progress"] = monitored["progress"]
+
+        return tasks
 
     def stats(self) -> dict[str, Any]:
         with self._tasks_lock:
@@ -491,6 +574,18 @@ class AsyncExecutor:
             "event_loop_running": self.is_running,
             "stopping": self.is_stopping,
         }
+
+    def task_info(self, task_id: str) -> dict[str, Any] | None:
+        task = self.monitor.get_task(task_id)
+
+        if task is not None:
+            return task
+
+        for item in self.monitor.history():
+            if item["task_id"] == task_id:
+                return item
+
+        return None
 
     def get_task(self, task_id: str) -> dict[str, Any] | None:
         with self._tasks_lock:

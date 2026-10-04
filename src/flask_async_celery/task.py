@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import inspect
+from concurrent.futures import CancelledError
 from contextvars import ContextVar
 from typing import Any
-from concurrent.futures import CancelledError
+
 from celery import Task
 from celery.exceptions import Ignore
+
 _async_executor: ContextVar[Any | None] = ContextVar(
     "flask_async_celery_executor",
     default=None,
@@ -24,6 +26,38 @@ def get_async_executor() -> Any | None:
     return _async_executor.get()
 
 
+async def update_progress(
+        *,
+        current: int | float,
+        total: int | float | None = None,
+        message: str | None = None,
+) -> None:
+    """
+    Update progress for the currently executing async task.
+    """
+    executor = get_async_executor()
+
+    if executor is None:
+        raise RuntimeError(
+            "update_progress() requires an AsyncExecutor. "
+            "Make sure the task is running inside AsyncIOPool."
+        )
+
+    task_id = executor.current_task_id
+
+    if task_id is None:
+        raise RuntimeError(
+            "update_progress() must be called from an active async task."
+        )
+
+    executor.monitor.record_progress(
+        task_id,
+        current=current,
+        total=total,
+        message=message,
+    )
+
+
 class AsyncTask(Task):
     """
     Celery Task base for native async tasks.
@@ -37,6 +71,28 @@ class AsyncTask(Task):
     """
 
     abstract = True
+
+    async def update_progress(
+            self,
+            *,
+            current: int | float,
+            total: int | float | None = None,
+            message: str | None = None,
+    ) -> None:
+        """Update progress for the currently executing async task."""
+        executor = get_async_executor()
+
+        if executor is None:
+            raise RuntimeError(
+                "AsyncTask progress reporting requires an AsyncExecutor."
+            )
+
+        executor.monitor.record_progress(
+            self.request.id,
+            current=current,
+            total=total,
+            message=message,
+        )
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if not inspect.iscoroutinefunction(self.run):
@@ -78,6 +134,8 @@ class AsyncTask(Task):
                 coroutine,
                 task_id=self.request.id,
                 task_name=self.name,
+                worker=getattr(request, "hostname", None),
+
             )
         except BaseException:
             if inspect.iscoroutine(coroutine):
