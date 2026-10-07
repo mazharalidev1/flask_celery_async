@@ -30,6 +30,44 @@ class AsyncCeleryCollector:
         metric.add_metric([worker], value)
         return metric
 
+    @staticmethod
+    def _task_counter(
+            name,
+            documentation,
+            task_name,
+            worker,
+            value,
+    ):
+        metric = CounterMetricFamily(
+            name,
+            documentation,
+            labels=["task_name", "worker"],
+        )
+        metric.add_metric(
+            [task_name, worker or "unknown"],
+            value,
+        )
+        return metric
+
+    @staticmethod
+    def _task_gauge(
+            name,
+            documentation,
+            task_name,
+            worker,
+            value,
+    ):
+        metric = GaugeMetricFamily(
+            name,
+            documentation,
+            labels=["task_name", "worker"],
+        )
+        metric.add_metric(
+            [task_name, worker or "unknown"],
+            value,
+        )
+        return metric
+
     def collect(self):
         replies = self.celery_app.control.broadcast(
             "async_stats",
@@ -114,6 +152,70 @@ class AsyncCeleryCollector:
                     worker,
                     int(stats.get("stopping", False)),
                 )
+                for task_metric in stats.get("task_metrics", []):
+                    task_name = task_metric.get(
+                        "task_name",
+                        "unknown",
+                    )
+                    task_worker = task_metric.get(
+                        "worker",
+                    ) or worker
+
+                    yield self._task_counter(
+                        "flask_async_celery_task_received",
+                        "Total number of async tasks received by task name.",
+                        task_name,
+                        task_worker,
+                        task_metric.get("received", 0),
+                    )
+
+                    yield self._task_counter(
+                        "flask_async_celery_task_started",
+                        "Total number of async tasks started by task name.",
+                        task_name,
+                        task_worker,
+                        task_metric.get("started", 0),
+                    )
+
+                    yield self._task_counter(
+                        "flask_async_celery_task_completed",
+                        "Total number of async tasks completed successfully by task name.",
+                        task_name,
+                        task_worker,
+                        task_metric.get("completed", 0),
+                    )
+
+                    yield self._task_counter(
+                        "flask_async_celery_task_failed",
+                        "Total number of async tasks failed by task name.",
+                        task_name,
+                        task_worker,
+                        task_metric.get("failed", 0),
+                    )
+
+                    yield self._task_counter(
+                        "flask_async_celery_task_cancelled",
+                        "Total number of async tasks cancelled by task name.",
+                        task_name,
+                        task_worker,
+                        task_metric.get("cancelled", 0),
+                    )
+
+                    yield self._task_gauge(
+                        "flask_async_celery_task_average_duration_seconds",
+                        "Average execution duration of async tasks by task name.",
+                        task_name,
+                        task_worker,
+                        task_metric.get("average_runtime", 0.0),
+                    )
+
+                    yield self._task_gauge(
+                        "flask_async_celery_task_average_queue_time_seconds",
+                        "Average queue wait time of async tasks by task name.",
+                        task_name,
+                        task_worker,
+                        task_metric.get("average_queue_time", 0.0),
+                    )
 
 
 def create_registry(celery_app) -> CollectorRegistry:

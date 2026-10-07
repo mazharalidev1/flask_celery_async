@@ -254,3 +254,123 @@ def test_clear():
     assert monitor.history_count == 0
     assert monitor.list_tasks() == []
     assert monitor.history() == []
+
+
+def test_metrics_track_successful_task():
+    monitor = TaskMonitor()
+
+    monitor.record_received(
+        "task-1",
+        task_name="example.task",
+        worker="celery@worker1",
+    )
+    monitor.record_started(
+        "task-1",
+        task_name="example.task",
+        worker="celery@worker1",
+    )
+    monitor.record_success("task-1")
+
+    metrics = monitor.metrics()
+
+    assert len(metrics) == 1
+
+    metric = metrics[0]
+
+    assert metric["task_name"] == "example.task"
+    assert metric["worker"] == "celery@worker1"
+    assert metric["received"] == 1
+    assert metric["started"] == 1
+    assert metric["completed"] == 1
+    assert metric["failed"] == 0
+    assert metric["cancelled"] == 0
+    assert metric["total_runtime"] >= 0
+    assert metric["total_queue_time"] >= 0
+
+
+def test_metrics_track_failures_and_cancellations():
+    monitor = TaskMonitor()
+
+    monitor.record_received(
+        "task-1",
+        task_name="example.task",
+        worker="celery@worker1",
+    )
+    monitor.record_started("task-1")
+    monitor.record_failure("task-1", ValueError("test"))
+
+    monitor.record_received(
+        "task-2",
+        task_name="example.task",
+        worker="celery@worker1",
+    )
+    monitor.record_started("task-2")
+    monitor.record_cancelled("task-2", reason="SIGTERM")
+
+    metrics = monitor.metrics()
+
+    assert len(metrics) == 1
+
+    metric = metrics[0]
+
+    assert metric["received"] == 2
+    assert metric["started"] == 2
+    assert metric["completed"] == 0
+    assert metric["failed"] == 1
+    assert metric["cancelled"] == 1
+
+
+def test_metrics_are_separated_by_task_name_and_worker():
+    monitor = TaskMonitor()
+
+    monitor.record_received(
+        "task-1",
+        task_name="example.task_a",
+        worker="celery@worker1",
+    )
+    monitor.record_started("task-1")
+    monitor.record_success("task-1")
+
+    monitor.record_received(
+        "task-2",
+        task_name="example.task_b",
+        worker="celery@worker2",
+    )
+    monitor.record_started("task-2")
+    monitor.record_success("task-2")
+
+    metrics = monitor.metrics()
+
+    assert len(metrics) == 2
+
+    keys = {
+        (metric["task_name"], metric["worker"])
+        for metric in metrics
+    }
+
+    assert keys == {
+        ("example.task_a", "celery@worker1"),
+        ("example.task_b", "celery@worker2"),
+    }
+
+
+def test_metrics_survive_history_limit():
+    monitor = TaskMonitor(max_history=1)
+
+    for index in range(3):
+        task_id = f"task-{index}"
+
+        monitor.record_received(
+            task_id,
+            task_name="example.task",
+            worker="celery@worker1",
+        )
+        monitor.record_started(task_id)
+        monitor.record_success(task_id)
+
+    assert len(monitor.history()) == 1
+
+    metrics = monitor.metrics()
+
+    assert len(metrics) == 1
+    assert metrics[0]["completed"] == 3

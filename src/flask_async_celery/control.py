@@ -17,6 +17,7 @@ def async_stats(state, **kwargs):
     return {
         "asyncio-enabled": True,
         **executor.stats(),
+        "task_metrics": executor.monitor.metrics(),
     }
 
 

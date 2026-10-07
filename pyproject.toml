@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flask-async-celery"
-version = "0.3.0"
-description = "AsyncIO execution pool for Celery with Flask integration"
+version = "0.4.0"
+description = "AsyncIO execution pool for Celery with Flask and Django integration"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "GPL-3.0-only"
@@ -16,6 +16,7 @@ keywords = [
     "celery",
     "asyncio",
     "flask",
+    "django",
     "async",
     "tasks",
     "redis",
@@ -40,6 +41,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+django = [
+    "Django>=4.2",
+]
+
 redis = [
     "redis>=5.0",
 ]
@@ -52,6 +57,7 @@ test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "prometheus-client>=0.20",
+    "Django>=4.2",
 ]
 
 dev = [

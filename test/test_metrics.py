@@ -32,6 +32,19 @@ def test_collector_exports_worker_metrics():
                 "long_running": 1,
                 "event_loop_running": True,
                 "stopping": False,
+                "task_metrics": [
+                    {
+                        "task_name": "example.task",
+                        "worker": "celery@worker1",
+                        "received": 20,
+                        "started": 18,
+                        "completed": 15,
+                        "failed": 2,
+                        "cancelled": 1,
+                        "average_runtime": 2.5,
+                        "average_queue_time": 0.15,
+                    }
+                ],
             }
         }
     ]
@@ -41,13 +54,36 @@ def test_collector_exports_worker_metrics():
 
     output = generate_latest(registry).decode()
 
-    assert 'flask_async_celery_running_tasks{worker="celery@worker1"} 2.0' in output
-    assert 'flask_async_celery_available_slots{worker="celery@worker1"} 3.0' in output
-    assert 'flask_async_celery_max_tasks{worker="celery@worker1"} 5.0' in output
+    # Worker metrics
+    assert (
+        'flask_async_celery_running_tasks'
+        '{worker="celery@worker1"} 2.0'
+    ) in output
 
-    assert 'flask_async_celery_completed_total{worker="celery@worker1"} 10.0' in output
-    assert 'flask_async_celery_failed_total{worker="celery@worker1"} 2.0' in output
-    assert 'flask_async_celery_cancelled_total{worker="celery@worker1"} 1.0' in output
+    assert (
+        'flask_async_celery_available_slots'
+        '{worker="celery@worker1"} 3.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_max_tasks'
+        '{worker="celery@worker1"} 5.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_completed_total'
+        '{worker="celery@worker1"} 10.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_failed_total'
+        '{worker="celery@worker1"} 2.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_cancelled_total'
+        '{worker="celery@worker1"} 1.0'
+    ) in output
 
     assert (
         'flask_async_celery_average_duration_seconds'
@@ -74,6 +110,115 @@ def test_collector_exports_worker_metrics():
         '{worker="celery@worker1"} 0.0'
     ) in output
 
+    # Task metrics
+    assert (
+        'flask_async_celery_task_received_total'
+        '{task_name="example.task",worker="celery@worker1"} 20.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_task_started_total'
+        '{task_name="example.task",worker="celery@worker1"} 18.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_task_completed_total'
+        '{task_name="example.task",worker="celery@worker1"} 15.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_task_failed_total'
+        '{task_name="example.task",worker="celery@worker1"} 2.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_task_cancelled_total'
+        '{task_name="example.task",worker="celery@worker1"} 1.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_task_average_duration_seconds'
+        '{task_name="example.task",worker="celery@worker1"} 2.5'
+    ) in output
+
+    assert (
+        'flask_async_celery_task_average_queue_time_seconds'
+        '{task_name="example.task",worker="celery@worker1"} 0.15'
+    ) in output
+
+
+
+def test_collector_exports_task_metrics():
+    replies = [
+        {
+            "celery@worker1": {
+                "running": 1,
+                "available": 4,
+                "max_tasks": 5,
+                "completed": 10,
+                "failed": 1,
+                "cancelled": 0,
+                "average_duration": 1.5,
+                "slow_task_threshold": 30.0,
+                "long_running": 0,
+                "event_loop_running": True,
+                "stopping": False,
+                "task_metrics": [
+                    {
+                        "task_name": "example.progress_task",
+                        "worker": "celery@worker1",
+                        "received": 10,
+                        "started": 10,
+                        "completed": 9,
+                        "failed": 1,
+                        "cancelled": 0,
+                        "average_runtime": 2.75,
+                        "average_queue_time": 0.025,
+                    }
+                ],
+            }
+        }
+    ]
+
+    app = make_celery_app(replies)
+    registry = create_registry(app)
+
+    output = generate_latest(registry).decode()
+
+    assert (
+        'flask_async_celery_task_received_total'
+        '{task_name="example.progress_task",worker="celery@worker1"} 10.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_task_started_total'
+        '{task_name="example.progress_task",worker="celery@worker1"} 10.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_task_completed_total'
+        '{task_name="example.progress_task",worker="celery@worker1"} 9.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_task_failed_total'
+        '{task_name="example.progress_task",worker="celery@worker1"} 1.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_task_cancelled_total'
+        '{task_name="example.progress_task",worker="celery@worker1"} 0.0'
+    ) in output
+
+    assert (
+        'flask_async_celery_task_average_duration_seconds'
+        '{task_name="example.progress_task",worker="celery@worker1"} 2.75'
+    ) in output
+
+    assert (
+        'flask_async_celery_task_average_queue_time_seconds'
+        '{task_name="example.progress_task",worker="celery@worker1"} 0.025'
+    ) in output
 
 def test_collector_supports_multiple_workers():
     replies = [

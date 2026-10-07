@@ -7,9 +7,10 @@ from typing import Any
 
 from celery import Task
 from celery.exceptions import Ignore
+from .context import TaskContext
 
 _async_executor: ContextVar[Any | None] = ContextVar(
-    "flask_async_celery_executor",
+    "async_celery_executor",
     default=None,
 )
 
@@ -111,15 +112,19 @@ class AsyncTask(Task):
         request = self.request
 
         # The Flask application is attached to the Celery app by AsyncCelery.
-        flask_app = getattr(self._get_app(), "flask_app", None)
+        task_context = getattr(
+            self._get_app(),
+            "task_context",
+            None,
+        )
 
         async def execute_with_request() -> Any:
             # Restore the Celery request inside the asyncio thread.
             self.push_request(**request.__dict__)
 
             try:
-                if flask_app is not None:
-                    with flask_app.app_context():
+                if task_context is not None:
+                    with task_context():
                         return await self.run(*args, **kwargs)
 
                 return await self.run(*args, **kwargs)

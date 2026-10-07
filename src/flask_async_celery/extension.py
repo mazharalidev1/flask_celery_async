@@ -5,8 +5,9 @@ from typing import Any
 from celery import Celery
 from flask import Flask
 from flask import Response
-from .bootstep import AsyncIOBootStep
-from .hub_bootstep import AsyncIOHubWakeupBootStep
+
+from .context import TaskContext
+from .core import AsyncCeleryCore
 from .task import AsyncTask
 
 
@@ -19,16 +20,16 @@ class AsyncCelery:
     """
 
     def __init__(
-        self,
-        app: Flask | None = None,
-        *,
-        celery: Celery | None = None,
-        broker_url: str | None = None,
-        result_backend: str | None = None,
-        max_tasks: int = 20,
-        disable_prefetch: bool = True,
-        slow_task_threshold: float = 30.0,
-        **celery_options: Any,
+            self,
+            app: Flask | None = None,
+            *,
+            celery: Celery | None = None,
+            broker_url: str | None = None,
+            result_backend: str | None = None,
+            max_tasks: int = 20,
+            disable_prefetch: bool = True,
+            slow_task_threshold: float = 30.0,
+            **celery_options: Any,
     ) -> None:
         if max_tasks < 1:
             raise ValueError(
@@ -36,22 +37,23 @@ class AsyncCelery:
             )
 
         self.app: Flask | None = None
-        self.celery: Celery
 
         self.max_tasks = max_tasks
         self.disable_prefetch = disable_prefetch
         self.slow_task_threshold = slow_task_threshold
-        if celery is not None:
-            self.celery = celery
-        else:
-            self.celery = Celery(
-                app.import_name if app is not None else "flask_async_celery",
-                broker=broker_url,
-                backend=result_backend,
-                **celery_options,
-            )
 
-        self._configure()
+        self.core = AsyncCeleryCore(
+            celery=celery,
+            app_name=app.import_name if app is not None else "flask_async_celery",
+            broker_url=broker_url,
+            result_backend=result_backend,
+            max_tasks=max_tasks,
+            disable_prefetch=disable_prefetch,
+            slow_task_threshold=slow_task_threshold,
+            **celery_options,
+        )
+
+        self.celery = self.core.celery
 
         if app is not None:
             self.init_app(app)
@@ -61,9 +63,9 @@ class AsyncCelery:
 
         app.extensions["async_celery"] = self
 
-        # Make the Flask application available to AsyncTask
-        # when the task executes in the Celery worker.
+        # Make the Flask application available to AsyncTask.
         self.celery.flask_app = app
+        self.celery.task_context = TaskContext(app.app_context)
 
         app.config.setdefault(
             "ASYNC_CELERY_MAX_TASKS",
@@ -97,31 +99,19 @@ class AsyncCelery:
             app.config["ASYNC_CELERY_SLOW_TASK_THRESHOLD"]
         )
 
-        self.celery.conf["ASYNC_CELERY_SLOW_TASK_THRESHOLD"] = (
-            self.slow_task_threshold
-        )
         if self.max_tasks < 1:
             raise ValueError(
                 "ASYNC_CELERY_MAX_TASKS must be greater than zero"
             )
 
-        self._configure()
+        self.core.max_tasks = self.max_tasks
+        self.core.disable_prefetch = self.disable_prefetch
+        self.core.slow_task_threshold = self.slow_task_threshold
+
+        # Reconfigure Celery using Flask's final configuration.
+        self.core.configure()
+
         self._register_metrics_endpoint()
-
-    def _configure(self) -> None:
-        self.celery.conf.update(
-            worker_pool="flask_async_celery.pool:AsyncIOPool",
-            worker_concurrency=self.max_tasks,
-            worker_disable_prefetch=self.disable_prefetch,
-        )
-
-        self.celery.steps["worker"].add(
-            AsyncIOBootStep
-        )
-
-        self.celery.steps["worker"].add(
-            AsyncIOHubWakeupBootStep
-        )
 
     def task(self, *args: Any, **kwargs: Any):
         """

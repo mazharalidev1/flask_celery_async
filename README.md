@@ -96,6 +96,14 @@ pip install "flask-async-celery[prometheus]"
 
 This installs `prometheus-client` for the built-in `/metrics` endpoint.
 
+### Django integration
+
+Django is optional and is not installed for Flask-only users:
+
+```bash
+pip install "flask-async-celery[django]"
+```
+
 ### Development installation
 
 Clone the repository and install it in editable mode:
@@ -191,6 +199,55 @@ celery = AsyncCelery(
 
 Flask configuration takes precedence over the constructor defaults when the extension is initialized.
 
+## Django Integration
+
+Django support is an optional integration. The async execution core remains framework-neutral, while Django-specific setup lives in `flask_async_celery.django`.
+
+### Setup
+
+```python
+from flask_async_celery.django import DjangoAsyncCelery
+
+celery = DjangoAsyncCelery(
+    broker_url="redis://127.0.0.1:6379/0",
+    result_backend="redis://127.0.0.1:6379/1",
+    max_tasks=10,
+)
+```
+
+Define native async tasks normally:
+
+```python
+@celery.task
+async def process_data(value):
+    return value * 2
+```
+
+Django application initialization remains Django's responsibility. The integration does not create a second Django application lifecycle. Django's async ORM can be used from async tasks:
+
+```python
+@celery.task
+async def count_items():
+    return await MyModel.objects.acount()
+```
+
+The canonical import is:
+
+```python
+from flask_async_celery.django import DjangoAsyncCelery
+```
+
+`DjangoAsyncCelery` is intentionally not exported from the package root, so importing `flask_async_celery` does not require Django to be installed.
+
+### Worker
+
+```bash
+celery -A your_project.celery worker \
+    -P flask_async_celery.pool:AsyncIOPool \
+    -c 10 \
+    --loglevel=INFO
+```
+
 ## Worker Configuration
 
 `AsyncCelery` configures the Celery worker to use the package's `AsyncIOPool` automatically.
@@ -250,6 +307,28 @@ Additional work waits for an available execution slot.
 This is different from simply creating more threads. The package uses one persistent asyncio event loop and runs async coroutines concurrently on that loop.
 
 Each Celery worker process has its own asyncio executor and event loop.
+
+## Task Progress
+
+Async tasks can report progress with `update_progress()`:
+
+```python
+from flask_async_celery import update_progress
+
+@celery.task
+async def process_items(total=10):
+    for current in range(1, total + 1):
+        await asyncio.sleep(1)
+        await update_progress(
+            current=current,
+            total=total,
+            message=f"Processed {current} of {total}",
+        )
+
+    return {"status": "completed"}
+```
+
+Progress is stored by the task monitor together with lifecycle information.
 
 ## Monitoring
 
@@ -315,6 +394,20 @@ app.config["ASYNC_CELERY_SLOW_TASK_THRESHOLD"] = 60.0
 ```
 
 A running task is reported as long-running when its execution duration is above the configured threshold.
+
+### Task-level metrics
+
+The monitor maintains aggregate metrics by `task_name` and `worker`, independent of bounded task history. The Prometheus collector exposes:
+
+- tasks received
+- tasks started
+- tasks completed
+- tasks failed
+- tasks cancelled
+- average task duration
+- average queue time
+
+Task IDs are intentionally not Prometheus labels to avoid unbounded label cardinality.
 
 ### Prometheus metrics
 
@@ -731,7 +824,9 @@ The test suite covers:
 - worker monitoring and control commands
 - Prometheus metric collection
 - Prometheus `/metrics` endpoint
+- task-level Prometheus metrics
 - Grafana dashboard configuration
+- Django integration and async ORM execution
 
 ## Project Structure
 
@@ -744,13 +839,17 @@ flask-async-celery/
 │   └── flask_async_celery/
 │       ├── __init__.py
 │       ├── extension.py
+│       ├── core.py
+│       ├── context.py
 │       ├── executor.py
 │       ├── bootstep.py
 │       ├── hub_bootstep.py
 │       ├── hub_wakeup.py
 │       ├── metrics.py
+│       ├── monitor.py
 │       ├── pool.py
-│       └── task.py
+│       ├── task.py
+│       └── django.py
 ├── example/
 │   └── monitoring/
 │       ├── __init__.py
@@ -944,10 +1043,10 @@ A successful test run should show all tests passing.
 
 ## Version
 
-Current version:
+Current development version:
 
 ```text
-0.2.1
+0.4.0
 ```
 
 ## License

@@ -76,6 +76,37 @@ class TaskRecord:
             "exception": self.exception,
         }
 
+@dataclass
+class TaskMetricRecord:
+    """Aggregate metrics for a task name and worker."""
+
+    task_name: str
+    worker: str | None = None
+
+    received: int = 0
+    started: int = 0
+    completed: int = 0
+    failed: int = 0
+    cancelled: int = 0
+
+    total_runtime: float = 0.0
+    total_queue_time: float = 0.0
+
+    @property
+    def average_runtime(self) -> float:
+        if self.completed + self.failed + self.cancelled == 0:
+            return 0.0
+
+        return self.total_runtime / (
+            self.completed + self.failed + self.cancelled
+        )
+
+    @property
+    def average_queue_time(self) -> float:
+        if self.started == 0:
+            return 0.0
+
+        return self.total_queue_time / self.started
 
 class TaskMonitor:
     """Thread-safe in-memory monitor for async Celery tasks."""
@@ -96,6 +127,8 @@ class TaskMonitor:
 
         self._tasks: dict[str, TaskRecord] = {}
         self._history: list[TaskRecord] = []
+
+        self._metrics: dict[tuple[str, str | None], TaskMetricRecord] = {}
 
     def _get_or_create(
         self,
@@ -140,6 +173,12 @@ class TaskMonitor:
             task.state = "RECEIVED"
             task.received_at = time.monotonic()
 
+            metric = self._get_metric_record(
+                task.task_name,
+                task.worker,
+            )
+            metric.received += 1
+
             return task
 
     def record_started(
@@ -163,6 +202,16 @@ class TaskMonitor:
                 task.received_at = time.monotonic()
 
             task.started_at = time.monotonic()
+
+            metric = self._get_metric_record(
+                task.task_name,
+                task.worker,
+            )
+
+            metric.started += 1
+
+            if task.queue_time is not None:
+                metric.total_queue_time += task.queue_time
 
             return task
 
@@ -189,9 +238,9 @@ class TaskMonitor:
         return self._record_finished(task_id, "SUCCESS")
 
     def record_failure(
-        self,
-        task_id: str,
-        exception: BaseException | str,
+            self,
+            task_id: str,
+            exception: BaseException | str,
     ) -> TaskRecord:
         """Record task failure."""
         with self._lock:
@@ -201,14 +250,25 @@ class TaskMonitor:
             task.finished_at = time.monotonic()
             task.exception = str(exception)
 
+            metric = self._get_metric_record(
+                task.task_name,
+                task.worker,
+            )
+
+            metric.failed += 1
+
+            runtime = task.runtime
+            if runtime is not None:
+                metric.total_runtime += runtime
+
             self._move_to_history(task)
 
             return task
 
     def record_cancelled(
-        self,
-        task_id: str,
-        reason: str | None = None,
+            self,
+            task_id: str,
+            reason: str | None = None,
     ) -> TaskRecord:
         """Record task cancellation."""
         with self._lock:
@@ -220,20 +280,43 @@ class TaskMonitor:
             if reason:
                 task.exception = reason
 
+            metric = self._get_metric_record(
+                task.task_name,
+                task.worker,
+            )
+
+            metric.cancelled += 1
+
+            runtime = task.runtime
+            if runtime is not None:
+                metric.total_runtime += runtime
+
             self._move_to_history(task)
 
             return task
 
     def _record_finished(
-        self,
-        task_id: str,
-        state: str,
+            self,
+            task_id: str,
+            state: str,
     ) -> TaskRecord:
         with self._lock:
             task = self._get_or_create(task_id)
 
             task.state = state
             task.finished_at = time.monotonic()
+
+            metric = self._get_metric_record(
+                task.task_name,
+                task.worker,
+            )
+
+            if state == "SUCCESS":
+                metric.completed += 1
+
+            runtime = task.runtime
+            if runtime is not None:
+                metric.total_runtime += runtime
 
             self._move_to_history(task)
 
@@ -281,6 +364,7 @@ class TaskMonitor:
         with self._lock:
             self._tasks.clear()
             self._history.clear()
+            self._metrics.clear()
 
     @property
     def active_count(self) -> int:
@@ -293,3 +377,44 @@ class TaskMonitor:
         """Return number of historical tasks."""
         with self._lock:
             return len(self._history)
+
+    def _get_metric_record(
+            self,
+            task_name: str | None,
+            worker: str | None,
+    ) -> TaskMetricRecord:
+        """Return the aggregate metric record for a task."""
+        name = task_name or "unknown"
+
+        key = (name, worker)
+
+        metric = self._metrics.get(key)
+
+        if metric is None:
+            metric = TaskMetricRecord(
+                task_name=name,
+                worker=worker,
+            )
+            self._metrics[key] = metric
+
+        return metric
+
+    def metrics(self) -> list[dict[str, Any]]:
+        """Return aggregate task metrics."""
+        with self._lock:
+            return [
+                {
+                    "task_name": metric.task_name,
+                    "worker": metric.worker,
+                    "received": metric.received,
+                    "started": metric.started,
+                    "completed": metric.completed,
+                    "failed": metric.failed,
+                    "cancelled": metric.cancelled,
+                    "total_runtime": metric.total_runtime,
+                    "average_runtime": metric.average_runtime,
+                    "total_queue_time": metric.total_queue_time,
+                    "average_queue_time": metric.average_queue_time,
+                }
+                for metric in self._metrics.values()
+            ]

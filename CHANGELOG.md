@@ -1,30 +1,34 @@
-## [0.3.0] - 2026-10-04
+## [0.4.0] - 2026-10-07
 
 ### Added
 
-- Task lifecycle monitoring
-- Task history tracking
-- Detailed task inspection
-- Task runtime tracking
-- Task queue wait time tracking
-- Worker hostname tracking
-- Async executor statistics
-- Async task progress reporting
-- `async_stats` Celery control command
-- `async_tasks` Celery control command
-- `async_task_info` Celery control command
-- Prometheus monitoring metrics
-- Grafana monitoring dashboard
+- Added Django integration through `DjangoAsyncCelery`
+- Added framework-neutral `AsyncCeleryCore` for shared Celery configuration
+- Added Django async task execution support
+- Added Django ORM compatibility for async tasks
+- Added task-level monitoring metrics
+- Added per-task received, started, completed, failed, and cancelled counters
+- Added per-task average runtime tracking
+- Added per-task average queue wait-time tracking
+- Added worker and task labels to Prometheus metrics
+- Added configurable task monitoring and metrics support
+- Added expanded Grafana dashboard with worker-level and task-level panels
+- Added Prometheus metrics for task-level execution statistics
 
 ### Improved
 
-- Task cancellation monitoring
-- Running, completed, failed, and cancelled task visibility
-- Slow-task monitoring
-- Task progress visibility during execution
+- Improved framework separation between the core executor and Flask integration
+- Improved monitoring statistics across workers and individual task types
+- Improved task metrics persistence independently of bounded task history
+- Improved configuration handling through the shared async Celery core
+- Improved Django worker integration and task registration
+- Improved documentation for Flask and Django usage
+- Improved project structure to support multiple web frameworks
 
 ### Documentation
 
-- Added task monitoring documentation
-- Added progress reporting examples
-- Added Prometheus/Grafana monitoring documentation
+- Updated README.md for the new Django integration
+- Added Django async task and ORM examples
+- Added task-level monitoring and Prometheus metrics documentation
+- Updated Grafana dashboard documentation
+- Updated architecture, project structure, and public API documentation
