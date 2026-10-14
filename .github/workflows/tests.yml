@@ -49,6 +49,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y redis-server
+          
 
       - name: Upgrade pip
         run: |
@@ -57,6 +58,7 @@ jobs:
       - name: Install package
         run: |
           pip install -e ".[test,redis]"
+          pip install -e ".[otel]"
 
       - name: Verify Redis
         run: |
