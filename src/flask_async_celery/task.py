@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
+import time
 from concurrent.futures import CancelledError
 from contextvars import ContextVar
 from typing import Any
 
 from celery import Task
 from celery.exceptions import Ignore
+from celery.exceptions import Retry
+
+from .tracing import (
+    extract_trace_context,
+    start_as_current_span,
+)
 from .context import TaskContext
 
 _async_executor: ContextVar[Any | None] = ContextVar(
@@ -123,11 +131,111 @@ class AsyncTask(Task):
             self.push_request(**request.__dict__)
 
             try:
-                if task_context is not None:
-                    with task_context():
-                        return await self.run(*args, **kwargs)
+                attributes = {
+                    "celery.task.name": self.name,
+                    "celery.task.id": request.id,
+                }
 
-                return await self.run(*args, **kwargs)
+                worker = getattr(request, "hostname", None)
+                if worker is not None:
+                    attributes["celery.worker"] = worker
+
+                trace_context = extract_trace_context(
+                    getattr(request, "headers", None)
+                )
+
+                with start_as_current_span(
+                        "celery.task",
+                        attributes=attributes,
+                        context=trace_context,
+                ) as span:
+                    monitor = getattr(executor, "monitor", None)
+                    task_record = (
+                        monitor.get_task(request.id)
+                        if monitor is not None
+                        else None
+                    )
+
+                    if span is not None and task_record is not None:
+                        wait_seconds = task_record.get("queue_time")
+                        if wait_seconds is not None:
+                            span.set_attribute(
+                                "flask_async_celery.executor_wait_seconds",
+                                wait_seconds,
+                            )
+
+                    execution_started_at = time.monotonic()
+
+                    try:
+                        if task_context is not None:
+                            with task_context():
+                                result = await self.run(*args, **kwargs)
+                        else:
+                            result = await self.run(*args, **kwargs)
+
+                    except asyncio.CancelledError:
+                        if span is not None:
+                            span.set_attribute(
+                                "flask_async_celery.cancelled",
+                                True,
+                            )
+                            span.set_attribute(
+                                "celery.task.outcome",
+                                "cancelled",
+                            )
+                        raise
+
+                    except Retry:
+                        if span is not None:
+                            span.set_attribute(
+                                "celery.task.outcome",
+                                "retry",
+                            )
+                            span.set_attribute(
+                                "celery.task.retry_requested",
+                                True,
+                            )
+                        raise
+
+                    except Exception as exc:
+                        if span is not None:
+                            span.set_attribute(
+                                "celery.task.outcome",
+                                "failure",
+                            )
+                            span.record_exception(exc)
+
+                            try:
+                                from opentelemetry.trace import (
+                                    Status,
+                                    StatusCode,
+                                )
+
+                                span.set_status(
+                                    Status(
+                                        StatusCode.ERROR,
+                                        description=str(exc),
+                                    )
+                                )
+                            except ImportError:
+                                pass
+
+                        raise
+
+                    else:
+                        if span is not None:
+                            span.set_attribute(
+                                "celery.task.outcome",
+                                "success",
+                            )
+                        return result
+
+                    finally:
+                        if span is not None:
+                            span.set_attribute(
+                                "flask_async_celery.execution_seconds",
+                                time.monotonic() - execution_started_at,
+                            )
 
             finally:
                 self.pop_request()

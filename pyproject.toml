@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flask-async-celery"
-version = "0.4.0"
+version = "0.5.0"
 description = "AsyncIO execution pool for Celery with Flask and Django integration"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -51,6 +51,10 @@ redis = [
 
 prometheus = [
     "prometheus-client>=0.20",
+]
+otel = [
+    "opentelemetry-api>=1.25",
+    "opentelemetry-sdk>=1.25",
 ]
 
 test = [

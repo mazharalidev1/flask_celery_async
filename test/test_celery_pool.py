@@ -1107,95 +1107,95 @@ def test_asyncio_pool_repeated_exception_batches(celery_app):
         pool.on_stop()
 
 
-# def test_asyncio_pool_memory_failures_without_future_retention(celery_app):
-#     """
-#     Diagnostic test for memory-heavy failures.
-#
-#     Each Future is consumed immediately so failed Future/exception
-#     objects are not intentionally retained by the test.
-#     """
-#
-#     import gc
-#     import os
-#
-#     import psutil
-#
-#     max_tasks = 5
-#     tasks_per_batch = 100
-#     batches = 5
-#     allocation_mb = 20
-#
-#     pool = AsyncIOPool(
-#         limit=max_tasks,
-#         app=celery_app,
-#     )
-#
-#     pool.on_start()
-#
-#     process = psutil.Process(os.getpid())
-#
-#     async def memory_failing_task(number):
-#         data = bytearray(
-#             allocation_mb * 1024 * 1024
-#         )
-#
-#         for offset in range(0, len(data), 4096):
-#             data[offset] = number % 256
-#
-#         await asyncio.sleep(0.02)
-#
-#         raise RuntimeError(
-#             f"expected memory failure {number}"
-#         )
-#
-#     try:
-#         gc.collect()
-#
-#         baseline = process.memory_info().rss
-#         rss_values = []
-#
-#         for batch in range(batches):
-#             for number in range(tasks_per_batch):
-#                 future = pool.on_apply(
-#                     target=memory_failing_task,
-#                     args=(number,),
-#                     callback=lambda value: None,
-#                 )
-#
-#                 with pytest.raises(
-#                         RuntimeError,
-#                         match=f"expected memory failure {number}",
-#                 ):
-#                     future.get(timeout=30)
-#
-#                 # Explicitly remove our reference to the failed result.
-#                 del future
-#
-#             gc.collect()
-#
-#             rss = process.memory_info().rss
-#             rss_values.append(rss)
-#
-#             print(
-#                 f"\nBatch {batch + 1}: "
-#                 f"{rss / 1024 / 1024:.1f} MB "
-#                 f"(+{(rss - baseline) / 1024 / 1024:.1f} MB)"
-#             )
-#
-#             assert pool.async_executor.running == 0
-#             assert pool.async_executor.available == max_tasks
-#
-#         print("\nRSS summary:")
-#
-#         for index, rss in enumerate(rss_values, start=1):
-#             print(
-#                 f"  Batch {index}: "
-#                 f"{rss / 1024 / 1024:.1f} MB"
-#             )
-#
-#     finally:
-#         pool.on_stop()
-#
+def test_asyncio_pool_memory_failures_without_future_retention(celery_app):
+    """
+    Diagnostic test for memory-heavy failures.
+
+    Each Future is consumed immediately so failed Future/exception
+    objects are not intentionally retained by the test.
+    """
+
+    import gc
+    import os
+
+    import psutil
+
+    max_tasks = 5
+    tasks_per_batch = 100
+    batches = 5
+    allocation_mb = 20
+
+    pool = AsyncIOPool(
+        limit=max_tasks,
+        app=celery_app,
+    )
+
+    pool.on_start()
+
+    process = psutil.Process(os.getpid())
+
+    async def memory_failing_task(number):
+        data = bytearray(
+            allocation_mb * 1024 * 1024
+        )
+
+        for offset in range(0, len(data), 4096):
+            data[offset] = number % 256
+
+        await asyncio.sleep(0.02)
+
+        raise RuntimeError(
+            f"expected memory failure {number}"
+        )
+
+    try:
+        gc.collect()
+
+        baseline = process.memory_info().rss
+        rss_values = []
+
+        for batch in range(batches):
+            for number in range(tasks_per_batch):
+                future = pool.on_apply(
+                    target=memory_failing_task,
+                    args=(number,),
+                    callback=lambda value: None,
+                )
+
+                with pytest.raises(
+                        RuntimeError,
+                        match=f"expected memory failure {number}",
+                ):
+                    future.get(timeout=30)
+
+                # Explicitly remove our reference to the failed result.
+                del future
+
+            gc.collect()
+
+            rss = process.memory_info().rss
+            rss_values.append(rss)
+
+            print(
+                f"\nBatch {batch + 1}: "
+                f"{rss / 1024 / 1024:.1f} MB "
+                f"(+{(rss - baseline) / 1024 / 1024:.1f} MB)"
+            )
+
+            assert pool.async_executor.running == 0
+            assert pool.async_executor.available == max_tasks
+
+        print("\nRSS summary:")
+
+        for index, rss in enumerate(rss_values, start=1):
+            print(
+                f"  Batch {index}: "
+                f"{rss / 1024 / 1024:.1f} MB"
+            )
+
+    finally:
+        pool.on_stop()
+
 
 
 def test_asyncio_pool_terminate_job_cancels_task(celery_app):

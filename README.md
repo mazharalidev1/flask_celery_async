@@ -480,6 +480,77 @@ example/monitoring/prometheus.yml
 
 The metrics collector uses the package's `async_stats` Celery control command to retrieve worker statistics. If no workers respond, the endpoint exports no async worker metrics.
 
+## OpenTelemetry & Distributed Tracing
+
+`flask-async-celery` supports optional OpenTelemetry tracing for asynchronous Celery tasks. It creates task spans, propagates trace context through Celery message headers, and records task outcomes.
+
+OpenTelemetry is optional. You can continue using the package without installing the tracing dependencies.
+
+### Installation
+
+Install the tracing dependencies with the optional extra:
+
+```bash
+pip install "flask-async-celery[otel]"
+```
+
+### Configuration
+
+Configure an OpenTelemetry `TracerProvider` during application startup. The following example exports spans to the console for development and testing.
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import (
+    SimpleSpanProcessor,
+    ConsoleSpanExporter,
+)
+
+provider = TracerProvider()
+provider.add_span_processor(
+    SimpleSpanProcessor(ConsoleSpanExporter())
+)
+
+trace.set_tracer_provider(provider)
+```
+
+Configure your Celery application and `flask-async-celery` integration as usual. The package registers its Celery trace-context propagation hook when the async core is configured.
+
+For production, configure an exporter appropriate for your observability platform.
+
+### Distributed trace propagation
+
+When a task is published while a span is active, the package injects the current trace context into the Celery message headers. The worker extracts that context and uses it when creating the task span.
+
+This allows task execution to be correlated with the operation that published the task, provided the producer has an active span and the relevant instrumentation is configured.
+
+Each task execution attempt receives its own span. When a task requests a Celery retry, the attempt is recorded with a `retry` outcome rather than being treated as an ordinary task failure.
+
+### Task span attributes
+
+Task spans include the following attributes when the relevant information is available:
+
+| Attribute | Description |
+| --- | --- |
+| `celery.task.name` | Registered Celery task name |
+| `celery.task.id` | Celery task ID |
+| `celery.worker` | Worker hostname |
+| `celery.task.outcome` | Task outcome: `success`, `failure`, `retry`, or `cancelled` |
+| `celery.task.retry_requested` | Whether the task requested a retry |
+| `flask_async_celery.cancelled` | Whether the task was cancelled |
+| `flask_async_celery.executor_wait_seconds` | Time spent waiting between executor submission and execution start, when monitor data is available |
+| `flask_async_celery.execution_seconds` | Duration of the async task execution and its framework context |
+
+Some attributes are only set for the corresponding outcome or when monitoring data is available.
+
+### Error handling
+
+Task exceptions are recorded on the span, and ordinary failures set the span status to `ERROR`. Cancellation and retry requests are recorded separately so they can be distinguished from ordinary task failures.
+
+### Optional dependency
+
+OpenTelemetry is an optional dependency. Without the OpenTelemetry packages installed, the tracing helpers use no-op behavior so tracing does not become a requirement for running async tasks.
+
 ### Grafana dashboard
 
 A ready-to-import Grafana dashboard is included at:
@@ -1046,7 +1117,7 @@ A successful test run should show all tests passing.
 Current development version:
 
 ```text
-0.4.0
+0.5.0
 ```
 
 ## License

@@ -32,3 +32,19 @@
 - Added task-level monitoring and Prometheus metrics documentation
 - Updated Grafana dashboard documentation
 - Updated architecture, project structure, and public API documentation
+
+## [0.5.0] - 2026-10-14
+
+### Added
+- Optional OpenTelemetry integration through the `otel` extra.
+- Distributed trace-context propagation through Celery task headers.
+- Task spans with task identity, worker, and outcome attributes.
+- Execution-duration and executor-wait span attributes.
+- Retry and cancellation outcome recording.
+- Integration tests for real-worker tracing and retry context propagation.
+
+### Changed
+- Async task tracing records retries separately from ordinary failures.
+
+### Compatibility
+- OpenTelemetry remains optional; the core package can run without it.

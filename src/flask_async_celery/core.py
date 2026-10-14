@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from celery import Celery
-
+from .tracing import setup_celery_tracing
 from .bootstep import AsyncIOBootStep
 from .hub_bootstep import AsyncIOHubWakeupBootStep
 
@@ -52,6 +52,7 @@ class AsyncCeleryCore:
 
         self.celery.steps["worker"].add(AsyncIOBootStep)
         self.celery.steps["worker"].add(AsyncIOHubWakeupBootStep)
+        setup_celery_tracing(self.celery)
 
     def send_task(self, *args: Any, **kwargs: Any):
         return self.celery.send_task(*args, **kwargs)
