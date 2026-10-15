@@ -26,4 +26,4 @@ celerybeat-schedule.*
 .env.*
 
 .DS_Store
-example/monitoring/data/
+examples/monitoring/data/

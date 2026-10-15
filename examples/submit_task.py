@@ -1,4 +1,4 @@
-from example.monitoring.main import progress_task
+from examples.monitoring.main import progress_task
 
 
 if __name__ == "__main__":

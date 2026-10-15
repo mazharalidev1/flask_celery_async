@@ -277,10 +277,10 @@ The custom pool exposes its configured concurrency through `num_processes`, allo
 
 ### Monitoring example
 
-The repository includes an example application under `example/monitoring`. Start it with:
+The repository includes an example application under `examples`. Start it with:
 
 ```bash
-celery -A example.monitoring.main:celery_app worker --loglevel=INFO
+celery -A examples.monitoring.main:celery_app worker --loglevel=INFO
 ```
 
 ## Concurrency
@@ -337,7 +337,7 @@ The package exposes async executor statistics through Celery's worker inspection
 The standard Celery inspect command includes the async metrics in the worker statistics:
 
 ```bash
-celery -A example.monitoring.main:celery_app inspect stats
+celery -A examples.monitoring.main:celery_app inspect stats
 ```
 
 The async statistics include:
@@ -475,7 +475,7 @@ scrape_configs:
 The repository includes this configuration at:
 
 ```text
-example/monitoring/prometheus.yml
+examples/monitoring/prometheus.yml
 ```
 
 The metrics collector uses the package's `async_stats` Celery control command to retrieve worker statistics. If no workers respond, the endpoint exports no async worker metrics.
@@ -556,7 +556,7 @@ OpenTelemetry is an optional dependency. Without the OpenTelemetry packages inst
 A ready-to-import Grafana dashboard is included at:
 
 ```text
-example/monitoring/grafana-dashboard.json
+examples/monitoring/grafana-dashboard.json
 ```
 
 The dashboard includes panels for:
@@ -593,10 +593,10 @@ Flask application
 Start the monitoring worker:
 
 ```bash
-celery -A example.monitoring.main:celery_app worker --loglevel=INFO
+celery -A examples.monitoring.main:celery_app worker --loglevel=INFO
 ```
 
-Start the Flask application using the monitoring example's application entry point, configure Prometheus to scrape its `/metrics` endpoint, and import `example/monitoring/grafana-dashboard.json` into Grafana.
+Start the Flask application using the monitoring example's application entry point, configure Prometheus to scrape its `/metrics` endpoint, and import `examples/monitoring/grafana-dashboard.json` into Grafana.
 
 ## Consumer Backpressure
 
@@ -921,7 +921,7 @@ flask-async-celery/
 │       ├── pool.py
 │       ├── task.py
 │       └── django.py
-├── example/
+├── examples/
 │   └── monitoring/
 │       ├── __init__.py
 │       ├── grafana-dashboard.json
@@ -1117,7 +1117,7 @@ A successful test run should show all tests passing.
 Current development version:
 
 ```text
-0.5.0
+0.5.1
 ```
 
 ## License

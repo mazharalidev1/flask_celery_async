@@ -29,13 +29,17 @@ def start_as_current_span(
     if tracer is None:
         return nullcontext()
 
-    return tracer.start_as_current_span(
-        name,
-        attributes=attributes,
-        context=context,
-        kind=kind,
-    )
+    kwargs = {
+        "attributes": attributes,
+        "context": context,
+        "record_exception": False,
+        "set_status_on_exception": False,
+    }
 
+    if kind is not None:
+        kwargs["kind"] = kind
+
+    return tracer.start_as_current_span(name, **kwargs)
 
 def inject_trace_context(carrier: dict[str, Any]) -> None:
     """Inject the current OpenTelemetry context into a message carrier."""

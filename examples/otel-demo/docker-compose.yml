@@ -1,0 +1,41 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.76.0
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+
+  api:
+    build:
+      context: ../..
+      dockerfile: examples/otel-demo/Dockerfile
+    command: flask --app app run --host=0.0.0.0
+    working_dir: /app/examples/otel-demo
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    ports:
+      - "5000:5000"
+    depends_on:
+      - redis
+      - jaeger
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: examples/otel-demo/Dockerfile
+    command: celery -A app:celery worker --loglevel=INFO
+    working_dir: /app/examples/otel-demo
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+    depends_on:
+      - redis
+      - jaeger

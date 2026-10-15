@@ -1,3 +1,31 @@
+## [0.5.1] - 2026-10-15
+
+### Fixed
+- Prevent Celery retry exceptions from automatically marking task spans as errors.
+- Preserve explicit error recording for genuine task failures.
+
+### Added
+- Added a Docker Compose OpenTelemetry demo with Flask, Celery, and distributed tracing.
+
+### Changed
+- Renamed the `example/` directory to `examples/` and updated documentation paths.
+
+## [0.5.0] - 2026-10-14
+
+### Added
+- Optional OpenTelemetry integration through the `otel` extra.
+- Distributed trace-context propagation through Celery task headers.
+- Task spans with task identity, worker, and outcome attributes.
+- Execution-duration and executor-wait span attributes.
+- Retry and cancellation outcome recording.
+- Integration tests for real-worker tracing and retry context propagation.
+
+### Changed
+- Async task tracing records retries separately from ordinary failures.
+
+### Compatibility
+- OpenTelemetry remains optional; the core package can run without it.
+
 ## [0.4.0] - 2026-10-07
 
 ### Added
@@ -33,18 +61,3 @@
 - Updated Grafana dashboard documentation
 - Updated architecture, project structure, and public API documentation
 
-## [0.5.0] - 2026-10-14
-
-### Added
-- Optional OpenTelemetry integration through the `otel` extra.
-- Distributed trace-context propagation through Celery task headers.
-- Task spans with task identity, worker, and outcome attributes.
-- Execution-duration and executor-wait span attributes.
-- Retry and cancellation outcome recording.
-- Integration tests for real-worker tracing and retry context propagation.
-
-### Changed
-- Async task tracing records retries separately from ordinary failures.
-
-### Compatibility
-- OpenTelemetry remains optional; the core package can run without it.

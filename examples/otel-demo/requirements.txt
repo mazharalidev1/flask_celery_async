@@ -1,0 +1,4 @@
+Flask>=3.0
+redis>=5.0
+opentelemetry-instrumentation-flask
+opentelemetry-exporter-otlp-proto-grpc
