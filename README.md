@@ -109,7 +109,7 @@ pip install "flask-async-celery[django]"
 Clone the repository and install it in editable mode:
 
 ```bash
-git clone https://github.com/mazharali-devops/flask_celery_async.git
+git clone https://github.com/mazharalidev1/flask_celery_async.git
 cd flask_celery_async
 
 pip install -e ".[test]"
@@ -871,7 +871,7 @@ because `AsyncCelery` automatically uses `AsyncTask` for async tasks.
 Clone the repository and install the project in editable mode:
 
 ```bash
-git clone https://github.com/mazharali-devops/flask_celery_async.git
+git clone https://github.com/mazharalidev1/flask_celery_async.git
 cd flask_celery_async
 
 pip install -e ".[test]"
