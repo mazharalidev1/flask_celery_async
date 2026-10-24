@@ -1,0 +1,137 @@
+name: Installed Wheel Integration
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  wheel-async-task:
+    name: Run async task from installed wheel
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Build package wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --wheel
+
+      - name: Create clean environment and install wheel with Redis support
+        shell: bash
+        run: |
+          python -m venv .wheel-venv
+          .wheel-venv/bin/python -m pip install --upgrade pip
+          wheel_file="$(basename dist/*.whl)"
+          .wheel-venv/bin/python -m pip install "dist/${wheel_file}[redis]"
+
+      - name: Create smoke-test Celery application
+        run: |
+          mkdir -p /tmp/flask-async-celery-wheel-smoke
+          cat > /tmp/flask-async-celery-wheel-smoke/app.py <<'PY'
+          import asyncio
+          import os
+
+          from flask import Flask
+          from flask_async_celery import AsyncCelery
+
+          app = Flask("wheel_integration_smoke")
+          celery = AsyncCelery(
+              app,
+              broker_url=os.environ.get(
+                  "CELERY_BROKER_URL",
+                  "redis://127.0.0.1:6379/0",
+              ),
+              result_backend=os.environ.get(
+                  "CELERY_RESULT_BACKEND",
+                  "redis://127.0.0.1:6379/1",
+              ),
+              max_tasks=2,
+              disable_prefetch=True,
+          )
+
+          @celery.task(name="wheel_smoke.add")
+          async def add(left, right):
+              await asyncio.sleep(0.05)
+              return left + right
+          PY
+
+      - name: Start worker and execute an async task
+        shell: bash
+        env:
+          CELERY_BROKER_URL: redis://127.0.0.1:6379/0
+          CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/1
+        run: |
+          set -euo pipefail
+          cd /tmp/flask-async-celery-wheel-smoke
+
+          /home/runner/work/flask_celery_async/flask_celery_async/.wheel-venv/bin/celery \
+            -A app:celery worker \
+            --pool=flask_async_celery.pool:AsyncIOPool \
+            --concurrency=2 \
+            --loglevel=INFO > worker.log 2>&1 &
+          worker_pid=$!
+
+          cleanup() {
+            kill "$worker_pid" 2>/dev/null || true
+            wait "$worker_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=0
+          for attempt in $(seq 1 60); do
+            if grep -q "ready." worker.log; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$worker_pid" 2>/dev/null; then
+              cat worker.log
+              echo "Celery worker exited before becoming ready."
+              exit 1
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" -ne 1 ]; then
+            cat worker.log
+            echo "Timed out waiting for Celery worker readiness."
+            exit 1
+          fi
+
+          PYTHONPATH="/tmp/flask-async-celery-wheel-smoke" \
+            /home/runner/work/flask_celery_async/flask_celery_async/.wheel-venv/bin/python - <<'PY'
+          from app import add
+          import flask_async_celery
+
+          result = add.delay(20, 22)
+          value = result.get(timeout=30)
+
+          assert value == 42, f"Expected 42, received {value!r}"
+          print(f"Installed wheel async task passed: {value}")
+          print(f"Package version: {flask_async_celery.__version__}")
+          PY
+
+          cat worker.log
