@@ -1,0 +1,151 @@
+name: Package Smoke Tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  minimal-install:
+    name: Minimal install (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package without optional extras
+        run: python -m pip install .
+
+      - name: Verify core imports and optional integrations
+        run: |
+          python - <<'PY'
+          from importlib.util import find_spec
+
+          optional_modules = (
+              "django",
+              "redis",
+              "prometheus_client",
+              "opentelemetry",
+          )
+          installed = [
+              module for module in optional_modules
+              if find_spec(module) is not None
+          ]
+          if installed:
+              raise SystemExit(
+                  "Optional modules unexpectedly installed: "
+                  + ", ".join(installed)
+              )
+
+          from flask import Flask
+          import flask_async_celery
+          from flask_async_celery import AsyncCelery, AsyncTask
+
+          assert flask_async_celery.__version__
+          app = Flask("minimal_install_smoke")
+          celery = AsyncCelery(
+              app,
+              broker_url="memory://",
+              result_backend="cache+memory://",
+              max_tasks=2,
+          )
+
+          assert app.extensions["async_celery"] is celery
+          assert celery.celery.conf.worker_concurrency == 2
+          assert celery.celery.conf.worker_pool == (
+              "flask_async_celery.pool:AsyncIOPool"
+          )
+          assert AsyncTask is not None
+
+          print(
+              "Minimal install passed:",
+              flask_async_celery.__version__,
+          )
+          PY
+
+  wheel-smoke:
+    name: Build and install wheel
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build
+
+      - name: Build wheel
+        run: python -m build --wheel
+
+      - name: Create clean environment and install wheel
+        run: |
+          python -m venv .smoke-venv
+          .smoke-venv/bin/python -m pip install --upgrade pip
+          .smoke-venv/bin/python -m pip install dist/*.whl
+
+      - name: Verify installed wheel
+        run: |
+          .smoke-venv/bin/python - <<'PY'
+          from importlib.util import find_spec
+          from flask import Flask
+          import flask_async_celery
+          from flask_async_celery import AsyncCelery
+
+          optional_modules = (
+              "django",
+              "redis",
+              "prometheus_client",
+              "opentelemetry",
+          )
+          installed = [
+              module for module in optional_modules
+              if find_spec(module) is not None
+          ]
+          if installed:
+              raise SystemExit(
+                  "Optional modules unexpectedly installed: "
+                  + ", ".join(installed)
+              )
+
+          app = Flask("wheel_smoke")
+          celery = AsyncCelery(
+              app,
+              broker_url="memory://",
+              result_backend="cache+memory://",
+              max_tasks=2,
+          )
+
+          assert app.extensions["async_celery"] is celery
+          assert celery.celery.conf.worker_concurrency == 2
+          assert flask_async_celery.__version__
+
+          print(
+              "Wheel smoke test passed:",
+              flask_async_celery.__version__,
+          )
+          PY
