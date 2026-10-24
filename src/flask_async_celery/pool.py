@@ -196,11 +196,17 @@ class AsyncIOPool(BasePool):
         super().on_stop()
 
     def on_terminate(self) -> None:
-
+        # Celery uses this hook when the worker is terminating, including
+        # the normal shutdown path used by its worker context manager.
+        # Wait for the async loop's bounded cleanup so callers cannot observe
+        # a stopped-but-not-yet-closed loop after worker termination.
         self.async_executor.shutdown(
-            wait=False,
+            wait=True,
+            timeout=10,
         )
 
+        # Do not block termination on bridge threads. Stopping the asyncio
+        # loop above releases threads waiting on coroutine futures.
         self.executor.shutdown(
             wait=False,
             cancel_futures=True,
