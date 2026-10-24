@@ -389,3 +389,46 @@ def test_cancel_task_after_shutdown():
 
     finally:
         executor.shutdown(wait=True, timeout=5)
+
+
+def test_shutdown_does_not_hang_if_task_suppresses_cancellation(monkeypatch):
+    from flask_async_celery import executor as executor_module
+
+    # Keep this regression test fast while exercising the timeout path.
+    monkeypatch.setattr(
+        executor_module,
+        "_SHUTDOWN_TASK_TIMEOUT",
+        0.05,
+    )
+
+    executor = executor_module.AsyncExecutor(
+        max_tasks=1,
+        thread_name="test-resistant-shutdown",
+    )
+    executor.start()
+
+    started = threading.Event()
+
+    async def resistant_task():
+        started.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            # Simulate user code that suppresses cancellation and never
+            # completes. Executor shutdown must still remain bounded.
+            await asyncio.Future()
+
+    executor.submit(resistant_task())
+    assert started.wait(timeout=5)
+
+    started_at = time.monotonic()
+    executor.shutdown(wait=True, timeout=1)
+    elapsed = time.monotonic() - started_at
+
+    assert elapsed < 0.5
+    assert executor.loop is None
+    assert executor.thread is not None
+    assert not executor.thread.is_alive()
+    assert executor.is_running is False
+    assert executor._stopped.is_set()
+
