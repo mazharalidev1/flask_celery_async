@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 
@@ -153,6 +154,62 @@ def test_async_task_exception_does_not_break_worker(celery_app):
         successful_result = successful_task.delay()
 
         assert successful_result.get(timeout=10) == "success"
+
+
+
+def test_real_worker_can_restart_after_graceful_shutdown(celery_app):
+    """
+    Verify that a real worker shuts down its asyncio pool cleanly and
+    that a fresh worker can execute async tasks using the same Celery app.
+    """
+
+    @celery_app.task(
+        name="test.worker_restart",
+        base=AsyncTask,
+    )
+    async def restart_task(value):
+        await asyncio.sleep(0.05)
+        return value
+
+    first_pool = None
+    with start_worker(
+            celery_app,
+            concurrency=2,
+            pool="flask_async_celery.pool:AsyncIOPool",
+            loglevel="INFO",
+            perform_ping_check=False,
+    ) as worker:
+        first_pool = worker.pool
+
+        assert first_pool.async_executor.is_running
+
+        result = restart_task.delay("before-shutdown")
+        assert result.get(timeout=10) == "before-shutdown"
+
+    # The worker context manager must wait for the custom pool to stop.
+    assert first_pool is not None
+    assert not first_pool.async_executor.is_running
+    assert first_pool.async_executor.loop is None
+    assert first_pool.executor._shutdown
+
+    with start_worker(
+            celery_app,
+            concurrency=2,
+            pool="flask_async_celery.pool:AsyncIOPool",
+            loglevel="INFO",
+            perform_ping_check=False,
+    ) as worker:
+        second_pool = worker.pool
+
+        assert second_pool.async_executor.is_running
+        assert second_pool is not first_pool
+
+        result = restart_task.delay("after-restart")
+        assert result.get(timeout=10) == "after-restart"
+
+    assert not second_pool.async_executor.is_running
+    assert second_pool.async_executor.loop is None
+    assert second_pool.executor._shutdown
 
 
 def test_real_celery_worker_handles_large_async_workload(
