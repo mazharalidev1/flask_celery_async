@@ -13,6 +13,9 @@ from .monitoring import TaskMonitor
 
 logger = logging.getLogger(__name__)
 
+# Keep executor cleanup bounded when user coroutines suppress cancellation.
+_SHUTDOWN_TASK_TIMEOUT = 5.0
+
 
 @dataclass
 class TaskInfo:
@@ -208,12 +211,25 @@ class AsyncExecutor:
                 for task in pending:
                     task.cancel()
 
-                loop.run_until_complete(
-                    asyncio.gather(
-                        *pending,
-                        return_exceptions=True,
+                # Do not wait indefinitely for a coroutine that suppresses
+                # CancelledError. A plain gather() can keep this thread in
+                # shutdown forever, leaving self.loop pointing at a stopped
+                # but unclosed event loop. asyncio.wait() lets cleanup proceed
+                # once the cancellation grace period expires.
+                _, still_pending = loop.run_until_complete(
+                    asyncio.wait(
+                        pending,
+                        timeout=_SHUTDOWN_TASK_TIMEOUT,
                     )
                 )
+
+                if still_pending:
+                    logger.warning(
+                        "%s asyncio task(s) did not finish cancellation "
+                        "within %.1f seconds; closing the event loop",
+                        len(still_pending),
+                        _SHUTDOWN_TASK_TIMEOUT,
+                    )
 
         except Exception:
             logger.exception(
