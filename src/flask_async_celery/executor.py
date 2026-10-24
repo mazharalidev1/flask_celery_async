@@ -472,32 +472,45 @@ class AsyncExecutor:
         loop = self.loop
 
         if loop is None:
-            self._stopped.set()
-            return
+            # The loop reference is cleared near the end of its thread's
+            # cleanup. Do not report shutdown complete before that thread
+            # has actually exited.
+            if self.thread is None or not self.thread.is_alive():
+                self._stopped.set()
 
-        if not loop.is_running():
-            self._stopped.set()
-            return
+        elif loop.is_running():
+            logger.info("Stopping AsyncIO executor")
 
-        logger.info("Stopping AsyncIO executor")
+            try:
+                loop.call_soon_threadsafe(loop.stop)
+            except RuntimeError:
+                logger.debug(
+                    "AsyncIO event loop already stopped",
+                    exc_info=True,
+                )
 
-        try:
-            loop.call_soon_threadsafe(loop.stop)
-        except RuntimeError:
+        else:
+            # Another shutdown path may already have called loop.stop().
+            # The loop thread can still be cancelling pending tasks and
+            # closing the loop, so the blocking path must still join it.
             logger.debug(
-                "AsyncIO event loop already stopped",
-                exc_info=True,
+                "AsyncIO event loop already stopped; waiting for cleanup"
             )
 
-        if wait:
-            if self.thread:
-                self.thread.join(timeout=timeout)
+        if wait and self.thread:
+            if self.thread is threading.current_thread():
+                logger.warning(
+                    "Cannot wait for AsyncIO shutdown from its own thread"
+                )
+                return
 
-                if self.thread.is_alive():
-                    logger.warning(
-                        "AsyncIO thread did not stop within %.1f seconds",
-                        timeout,
-                    )
+            self.thread.join(timeout=timeout)
+
+            if self.thread.is_alive():
+                logger.warning(
+                    "AsyncIO thread did not stop within %.1f seconds",
+                    timeout,
+                )
 
     # ------------------------------------------------------------------
     # Helpers
