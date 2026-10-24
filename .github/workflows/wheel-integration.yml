@@ -85,6 +85,7 @@ jobs:
         env:
           CELERY_BROKER_URL: redis://127.0.0.1:6379/0
           CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/1
+          CELERY_CUSTOM_WORKER_POOL: flask_async_celery.pool:AsyncIOPool
         run: |
           set -euo pipefail
           cd /tmp/flask-async-celery-wheel-smoke
@@ -92,7 +93,7 @@ jobs:
 
           "$venv/bin/celery" \
             -A app:celery worker \
-            --pool=flask_async_celery.pool:AsyncIOPool \
+            --pool=custom \
             --concurrency=2 \
             --loglevel=INFO > worker.log 2>&1 &
           worker_pid=$!
