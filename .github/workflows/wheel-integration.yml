@@ -59,7 +59,7 @@ jobs:
           from flask_async_celery import AsyncCelery
 
           app = Flask("wheel_integration_smoke")
-          celery = AsyncCelery(
+          async_celery = AsyncCelery(
               app,
               broker_url=os.environ.get(
                   "CELERY_BROKER_URL",
@@ -72,8 +72,9 @@ jobs:
               max_tasks=2,
               disable_prefetch=True,
           )
+          celery = async_celery.celery
 
-          @celery.task(name="wheel_smoke.add")
+          @async_celery.task(name="wheel_smoke.add")
           async def add(left, right):
               await asyncio.sleep(0.05)
               return left + right
@@ -87,8 +88,9 @@ jobs:
         run: |
           set -euo pipefail
           cd /tmp/flask-async-celery-wheel-smoke
+          venv="$GITHUB_WORKSPACE/.wheel-venv"
 
-          /home/runner/work/flask_celery_async/flask_celery_async/.wheel-venv/bin/celery \
+          "$venv/bin/celery" \
             -A app:celery worker \
             --pool=flask_async_celery.pool:AsyncIOPool \
             --concurrency=2 \
@@ -122,7 +124,7 @@ jobs:
           fi
 
           PYTHONPATH="/tmp/flask-async-celery-wheel-smoke" \
-            /home/runner/work/flask_celery_async/flask_celery_async/.wheel-venv/bin/python - <<'PY'
+            "$venv/bin/python" - <<'PY'
           from app import add
           import flask_async_celery
 
