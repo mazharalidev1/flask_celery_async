@@ -241,12 +241,23 @@ from flask_async_celery.django import DjangoAsyncCelery
 
 ### Worker
 
+`DjangoAsyncCelery` configures the worker pool and worker concurrency when the Celery app is initialized. Start the worker without manually overriding the pool:
+
 ```bash
-celery -A your_project.celery worker \
-    -P flask_async_celery.pool:AsyncIOPool \
-    -c 10 \
-    --loglevel=INFO
+celery -A your_project.celery worker --loglevel=INFO
 ```
+
+Set the async concurrency with `max_tasks` when creating `DjangoAsyncCelery`:
+
+```python
+celery = DjangoAsyncCelery(
+    broker_url="redis://127.0.0.1:6379/0",
+    result_backend="redis://127.0.0.1:6379/1",
+    max_tasks=10,
+)
+```
+
+If you intentionally select the custom pool through Celery's CLI, use Celery's custom-pool mechanism: set `CELERY_CUSTOM_WORKER_POOL=flask_async_celery.pool:AsyncIOPool` and pass `--pool=custom`. Do not pass the Python import path directly to `-P`/`--pool`.
 
 ## Worker Configuration
 
